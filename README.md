@@ -4,7 +4,7 @@
 <h3 align="center">Infinity Synthetic Environments for Agentic Reinforcement Learning</h3>
 
 <p align="center">
-  <a href="https://github.com/Raibows">Zhaoyang Wang<sup>1</sup></a>,
+  <a href="https://zhaoyang.win">Zhaoyang Wang<sup>1</sup></a>,
   <a href="https://www.canwenxu.net/">Canwen Xu<sup>2</sup></a>,
   <a href="https://www.snowflake.com/en/blog/authors/boyi-liu/">Boyi Liu<sup>2</sup></a>,
   <a href="https://yitewang.github.io/">Yite Wang<sup>2</sup></a>,
@@ -32,6 +32,10 @@
 
 ---
 
+## 📣 News
+- Mar 16, 2026: we added the verification demo, please refer to [Verification](#verification) section!
+- Feb 10, 2026: we open-sourced the synthesis pipeline, 1,000 synthesized environments and RL trained agents at [Huggingface](https://huggingface.co/collections/Snowflake/agent-world-model)!
+
 ## 🎯 Overview
 
 The AWM synthesis pipeline incldues:
@@ -43,7 +47,7 @@ The AWM synthesis pipeline incldues:
 5. Generate **verification code** that inspects database state changes for reward signals
 
 ## 🔮 Resources
-We plan to release the syntheszied 1,000 executable environments and corresponding tasks, databases, and verification in huggingface. Please checkout huggingface repo at [Snowflake/AgentWorldModel-1K](https://huggingface.co/datasets/Snowflake/AgentWorldModel-1K). 
+We released the syntheszied 1,000 executable environments and corresponding tasks, databases, and verification in huggingface. Please checkout huggingface repo at [Snowflake/AgentWorldModel-1K](https://huggingface.co/datasets/Snowflake/AgentWorldModel-1K). 
 
 | Resource | Link |
 |----------|------|
@@ -106,6 +110,7 @@ Available commands:
   ├── check_all  Check all generated environments
   └── reset_db   Reset databases to initial state
   agent      Run a tool-use agent to solve a task by interacting with the environment
+  verify     Verify agent run outputs using code-augmented LLM-as-a-Judge or purely code-based Judge
 ```
 
 Use `awm <command> --help` to see options for any command, e.g. `awm gen task --help`.
@@ -207,15 +212,32 @@ AWM includes a simple agent demo that connects to an MCP environment to solve ta
 # serve the model
 vllm serve Snowflake/Arctic-AWM-4B --host 127.0.0.1 --port 8000
 
-# start the environment
+# start the environment, this will create an isolated folder outputs/servers/<timestamp> to save the environment related files such as initial.db, final.db, and etc.
 awm env start --scenario e_commerce_33 --envs_load_path outputs/gen_envs.jsonl --port 8001
 
 # run the agent
 awm agent \
     --task "show me the top 10 most expensive products" \
     --mcp_url http://localhost:8001/mcp \
-    --vllm_url http://localhost:8000/v1 \
+    --api_url http://localhost:8000/v1 \
     --model Snowflake/Arctic-AWM-4B
+```
+
+### Verification
+AWM supports two types of verification:
+1. `sql`, the recommended code-augmented LLM-as-a-Judge (requires LLM env vars, see Setup section)
+2. `code`, purely code-based Judge
+
+```bash
+# launch an isolated environment and run the agent to finish the task of corresponding scenario
+awm agent \
+    --scenario e_commerce_33 \
+    --task_id 0 \
+    --api_url http://localhost:8000/v1 \
+    --model Snowflake/Arctic-AWM-4B
+
+# after interaction, the trajectory will be saved to outputs/agents/<timestamp>, we can verify it by
+awm verify --input outputs/agents/<timestamp> --mode sql
 ```
 
 ## Citation

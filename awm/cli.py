@@ -10,6 +10,8 @@ class TopCmd(Enum):
     env = "env"
     # Agent commands
     agent = "agent"
+    # Verify agent run outputs using code-augmented LLM-as-a-Judge or purely code-based Judge
+    verify = "verify"
 
 
 class GenCmd(Enum):
@@ -56,6 +58,7 @@ def _build_commands() -> dict:
     from awm.core.test_env import Config as TestEnvConfig
     from awm.core.reset import Config as ResetConfig
     from awm.core.agent import Config as AgentConfig
+    from awm.core.verify import Config as VerifyConfig
 
     return {
         TopCmd.gen: {
@@ -75,6 +78,7 @@ def _build_commands() -> dict:
             EnvCmd.reset_db: ResetConfig,
         },
         TopCmd.agent: AgentConfig,
+        TopCmd.verify: VerifyConfig,
     }
 
 
@@ -93,6 +97,7 @@ DISPATCH = {
     (TopCmd.env, EnvCmd.check_all): "awm.core.test_env",
     (TopCmd.env, EnvCmd.reset_db): "awm.core.reset",
     (TopCmd.agent,): "awm.core.agent",
+    (TopCmd.verify,): "awm.core.verify",
 }
 
 

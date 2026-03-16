@@ -198,25 +198,31 @@ async def check_mcp_server(url: str, timeout: float = 10.0) -> tuple[bool, int, 
             except Exception as e:
                 return (False, 0, [], str(e))
 
-def wait_for_server(port, timeout=30) -> bool:
+async def async_wait_for_server(port: int, timeout: float = 60.0) -> bool:
+    """Wait for an MCP server to become available on the given port."""
     start_time = time.time()
     last_err = None
     while time.time() - start_time < timeout:
         try:
-            running, tools_count, tools, err = asyncio.run(check_mcp_server(url=f"http://localhost:{port}/mcp", timeout=8))
-            if running and tools_count and len(tools) > 0: 
+            running, tools_count, tools, err = await check_mcp_server(
+                url=f"http://localhost:{port}/mcp", timeout=10
+            )
+            if running and tools_count and len(tools) > 0:
                 return True
             else:
                 last_err = err
         except Exception:
             pass
-        
-        finally:
-            time.sleep(0.5)
+        await asyncio.sleep(0.5)
 
     if last_err:
         logger.error(f"Failed to connect to MCP server after {timeout}s: {last_err}")
     return False
+
+
+def wait_for_server(port: int, timeout: float = 60.0) -> bool:
+    """Sync wrapper around async_wait_for_server."""
+    return asyncio.run(async_wait_for_server(port, timeout=timeout))
 
 def kill_process_on_port(port):
     try:
@@ -364,6 +370,106 @@ def tools_json_save(data: dict | list, path: str):
             print(f"Failed to save JSON to {path}: {e}, fallback to repair_json")
             data = repair_json(str(data), return_objects=True)
             json.dump(data, f, indent=4, ensure_ascii=False, default=json_default)
+
+
+def normalize_azure_url(base_url: str) -> str:
+    """Normalize Azure OpenAI base URLs to include /openai/v1 suffix.
+    After normalization, we can directly use the OpenAI client to interact with the Azure OpenAI endpoint.
+    """
+    if "openai.azure.com" in base_url or "services.ai.azure.com" in base_url:
+        stripped = base_url.rstrip("/")
+        if not stripped.endswith("/openai/v1"):
+            return stripped + "/openai/v1"
+    return base_url
+
+
+def resolve_llm_config(
+    api_url_override: str | None = None,
+    model_override: str | None = None,
+    require_model: bool = False,
+) -> tuple[str, str, str]:
+    """Resolve LLM API URL, API key, and model from environment variables.
+
+    Supports Azure OpenAI and standard OpenAI providers via env vars:
+      - AWM_SYN_LLM_PROVIDER ("azure" | "openai")
+      - AZURE_ENDPOINT_URL / AZURE_OPENAI_API_KEY  (for azure)
+      - OPENAI_BASE_URL / OPENAI_API_KEY            (for openai)
+      - AWM_SYN_OVERRIDE_MODEL                       (model name)
+
+    Args:
+        api_url_override: if given, used directly as base_url (still normalized for Azure).
+        model_override: if given, used instead of AWM_SYN_OVERRIDE_MODEL env var.
+        require_model: if True, raises ValueError when no model can be resolved.
+
+    Returns:
+        (api_url, api_key, model)
+    """
+    provider = os.environ.get("AWM_SYN_LLM_PROVIDER", "").lower()
+
+    # --- resolve base URL ---
+    if api_url_override:
+        api_url = normalize_azure_url(api_url_override)
+    elif provider == "azure":
+        azure_endpoint = os.environ.get("AZURE_ENDPOINT_URL", "")
+        if not azure_endpoint:
+            raise ValueError(
+                "AZURE_ENDPOINT_URL not set.\n"
+                "Please set: AWM_SYN_LLM_PROVIDER, AZURE_ENDPOINT_URL, AZURE_OPENAI_API_KEY"
+            )
+        api_url = normalize_azure_url(azure_endpoint)
+    elif os.environ.get("OPENAI_BASE_URL"):
+        api_url = os.environ["OPENAI_BASE_URL"]
+    else:
+        raise ValueError("No LLM API URL provided.")
+
+    # --- resolve API key ---
+    if provider == "azure":
+        api_key = os.environ.get("AZURE_OPENAI_API_KEY", "EMPTY")
+    else:
+        api_key = os.environ.get("OPENAI_API_KEY", "EMPTY")
+
+    # --- resolve model ---
+    model = model_override or os.environ.get("AWM_SYN_OVERRIDE_MODEL", "")
+    if not model:
+        if require_model:
+            raise ValueError("AWM_SYN_OVERRIDE_MODEL not set and no model override provided")
+
+    return api_url, api_key, model
+
+
+def sanitize_for_json(obj):
+    """Recursively sanitize an object so it can be safely serialized to JSON."""
+    if isinstance(obj, dict):
+        return {str(k) if isinstance(k, tuple) else k: sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [sanitize_for_json(item) for item in obj]
+    elif isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="ignore")
+    else:
+        try:
+            json.dumps(obj)
+            return obj
+        except TypeError:
+            return str(obj)
+
+
+def find_scenario_entry(
+    data: list[dict],
+    scenario: str,
+    task_idx: int | None = None,
+) -> dict | None:
+    """Find an entry in a JSONL-loaded list by normalized scenario name and optional task_idx.
+    Returns:
+        The first matching dict, or None.
+    """
+    scenario_norm = normalize_scenario_name(scenario)
+    for entry in data:
+        if normalize_scenario_name(entry.get("scenario", "")) != scenario_norm:
+            continue
+        if task_idx is not None and entry.get("task_idx") != task_idx:
+            continue
+        return entry
+    return None
 
 
 if __name__ == "__main__":
